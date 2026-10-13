@@ -89,6 +89,9 @@ function renderMessage(message, prepend = false) {
   const article = document.createElement("article");
   const isOwnMessage = message.user_id === currentUser.id;
   article.className = isOwnMessage ? "chat-message chat-message-own" : "chat-message";
+  if (message.audio_mime) {
+    article.classList.add("chat-message-voice");
+  }
   article.dataset.messageId = String(message.id);
 
   const details = document.createElement("div");
@@ -125,13 +128,7 @@ function renderMessage(message, prepend = false) {
     article.append(imageLink);
   }
   if (message.audio_mime) {
-    const audio = document.createElement("audio");
-    audio.className = "chat-message-audio";
-    audio.controls = true;
-    audio.preload = "none";
-    audio.src = `./api/conversations/${conversationId}/audio/${message.id}`;
-    audio.setAttribute("aria-label", `Voice note from ${message.sender}`);
-    article.append(audio);
+    article.append(createVoiceNotePlayer(message));
   }
   if (message.body) {
     article.append(body);
@@ -150,6 +147,153 @@ function renderMessage(message, prepend = false) {
     chatHistory.append(article);
   }
   renderedMessages.set(message.id, article);
+}
+
+function formatAudioTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return "0:00";
+  }
+  const wholeSeconds = Math.floor(seconds);
+  return `${Math.floor(wholeSeconds / 60)}:${String(wholeSeconds % 60).padStart(2, "0")}`;
+}
+
+function createVoiceNotePlayer(message) {
+  const player = document.createElement("div");
+  player.className = "voice-note-player";
+
+  const audio = document.createElement("audio");
+  audio.preload = "none";
+  audio.src = `./api/conversations/${conversationId}/audio/${message.id}`;
+  audio.setAttribute("aria-label", `Voice note from ${message.sender}`);
+
+  const playButton = document.createElement("button");
+  playButton.className = "voice-note-play-button";
+  playButton.type = "button";
+  playButton.setAttribute("aria-label", "Play voice note");
+  playButton.innerHTML = '<svg class="voice-play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 12 7-12 7V5Z" /></svg><svg class="voice-pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zm7 0h4v14h-4z" /></svg>';
+
+  const trackColumn = document.createElement("div");
+  trackColumn.className = "voice-note-track-column";
+  const waveform = document.createElement("div");
+  waveform.className = "voice-note-waveform";
+  waveform.setAttribute("role", "slider");
+  waveform.setAttribute("tabindex", "0");
+  waveform.setAttribute("aria-label", `Seek voice note from ${message.sender}`);
+  waveform.setAttribute("aria-valuemin", "0");
+  waveform.setAttribute("aria-valuemax", "0");
+  waveform.setAttribute("aria-valuenow", "0");
+  waveform.setAttribute("aria-valuetext", "0:00 of 0:00");
+  const bars = [];
+
+  let seed = (message.id * 2654435761) >>> 0;
+  for (let index = 0; index < 36; index += 1) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const bar = document.createElement("span");
+    bar.style.setProperty("--wave-height", `${18 + seed % 75}%`);
+    waveform.append(bar);
+    bars.push(bar);
+  }
+
+  const timing = document.createElement("div");
+  timing.className = "voice-note-timing";
+  const elapsed = document.createElement("span");
+  elapsed.textContent = "0:00";
+  const duration = document.createElement("span");
+  duration.textContent = "0:00";
+  timing.append(elapsed, duration);
+  trackColumn.append(waveform, timing);
+  player.append(playButton, trackColumn, audio);
+
+  const updateProgress = () => {
+    const currentTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+    const total = Number.isFinite(audio.duration) ? audio.duration : 0;
+    const progress = total > 0 ? Math.min(100, currentTime / total * 100) : 0;
+    waveform.setAttribute("aria-valuemax", String(Math.floor(total)));
+    waveform.setAttribute("aria-valuenow", String(Math.floor(currentTime)));
+    waveform.setAttribute("aria-valuetext", `${formatAudioTime(currentTime)} of ${formatAudioTime(total)}`);
+    bars.forEach((bar, index) => {
+      bar.classList.toggle("is-played", index / bars.length < progress / 100);
+    });
+    elapsed.textContent = formatAudioTime(currentTime);
+    duration.textContent = formatAudioTime(total);
+  };
+
+  const pauseOtherVoiceNotes = () => {
+    document.querySelectorAll(".voice-note-player audio").forEach((otherAudio) => {
+      if (otherAudio !== audio && !otherAudio.paused) {
+        otherAudio.pause();
+      }
+    });
+  };
+
+  playButton.addEventListener("click", async () => {
+    if (audio.paused) {
+      pauseOtherVoiceNotes();
+      try {
+        await audio.play();
+      } catch (error) {
+        console.error("Could not play the voice note.", error);
+        setStatus("Could not play this voice note. Check your connection and try again.", true);
+      }
+    } else {
+      audio.pause();
+    }
+  });
+
+  const seekToPointer = (event) => {
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+      return;
+    }
+    const bounds = waveform.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    audio.currentTime = ratio * audio.duration;
+    updateProgress();
+  };
+
+  waveform.addEventListener("click", seekToPointer);
+  waveform.addEventListener("keydown", (event) => {
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+      return;
+    }
+    const step = event.shiftKey ? 10 : 5;
+    if (event.key === "ArrowRight") {
+      audio.currentTime = Math.min(audio.duration, audio.currentTime + step);
+    } else if (event.key === "ArrowLeft") {
+      audio.currentTime = Math.max(0, audio.currentTime - step);
+    } else if (event.key === "Home") {
+      audio.currentTime = 0;
+    } else if (event.key === "End") {
+      audio.currentTime = audio.duration;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    updateProgress();
+  });
+
+  audio.addEventListener("loadedmetadata", updateProgress);
+  audio.addEventListener("durationchange", updateProgress);
+  audio.addEventListener("timeupdate", updateProgress);
+  audio.addEventListener("play", () => {
+    player.classList.add("is-playing");
+    playButton.setAttribute("aria-label", "Pause voice note");
+    setStatus("Connected");
+  });
+  audio.addEventListener("pause", () => {
+    player.classList.remove("is-playing");
+    playButton.setAttribute("aria-label", "Play voice note");
+  });
+  audio.addEventListener("ended", () => {
+    audio.currentTime = 0;
+    updateProgress();
+  });
+  audio.addEventListener("error", () => {
+    if (audio.error) {
+      setStatus("Could not load this voice note. Check your connection and try again.", true);
+    }
+  });
+
+  return player;
 }
 
 function updateReceiptAfterAppend(article, message) {
@@ -181,6 +325,14 @@ async function fetchHistory(parameters = {}) {
   return data.messages;
 }
 
+async function cacheMessages(messages) {
+  try {
+    await window.MurmurChatCache.write(currentUser.id, conversationId, messages);
+  } catch (error) {
+    console.error("Could not save private chat history on this device.", error);
+  }
+}
+
 function updatePagination(messages) {
   if (messages.length > 0) {
     oldestMessageId = Math.min(oldestMessageId ?? Infinity, messages[0].id);
@@ -201,6 +353,7 @@ async function loadLatestMessages(markAsRead = !document.hidden) {
   for (const message of messages) {
     renderMessage(message);
   }
+  await cacheMessages(messages);
   updatePagination(messages);
   if (messages.length > 0 && markAsRead) {
     markRead(messages[messages.length - 1].id).catch((error) => {
@@ -224,6 +377,7 @@ async function loadOlderMessages() {
     for (const message of messages) {
       renderMessage(message, true);
     }
+    await cacheMessages(messages);
     updatePagination(messages);
     chatHistory.scrollTop = previousScrollTop + chatHistory.scrollHeight - previousScrollHeight;
   } catch (error) {
@@ -328,6 +482,7 @@ chatForm.addEventListener("submit", async (event) => {
     }
     chatMessageInput.value = "";
     renderMessage(data.message);
+    await cacheMessages([data.message]);
     chatHistory.scrollTop = chatHistory.scrollHeight;
     setStatus("Connected");
   } catch (error) {
@@ -408,6 +563,7 @@ async function uploadVoiceNote(blob) {
       body: blob
     });
     renderMessage(data.message);
+    await cacheMessages([data.message]);
     chatHistory.scrollTop = chatHistory.scrollHeight;
     setStatus("Connected");
   } catch (error) {
@@ -512,10 +668,9 @@ async function initializeConversation() {
     }
     conversationId = conversationIdFromUrl;
 
-    const [userData, conversationsData, updates] = await Promise.all([
+    const [userData, conversationsData] = await Promise.all([
       requestJson("./api/me", { headers: { Accept: "application/json" } }),
-      requestJson("./api/conversations", { headers: { Accept: "application/json" } }),
-      requestJson("./api/updates?after_id=0", { headers: { Accept: "application/json" } })
+      requestJson("./api/conversations", { headers: { Accept: "application/json" } })
     ]);
     if (!userData.user) {
       window.location.replace("./login.html");
@@ -540,12 +695,28 @@ async function initializeConversation() {
       threadAvatar.append(avatar);
     }
 
+    try {
+      const cachedMessages = await window.MurmurChatCache.read(currentUser.id, conversationId);
+      for (const message of cachedMessages) {
+        renderMessage(message);
+      }
+      if (cachedMessages.length > 0) {
+        updatePagination(cachedMessages);
+        chatHistory.scrollTop = chatHistory.scrollHeight;
+        setStatus("Loading the latest messages…");
+      }
+    } catch (error) {
+      console.error("Could not read private chat history saved on this device.", error);
+    }
+
+    const [updates] = await Promise.all([
+      requestJson("./api/updates?after_id=0", { headers: { Accept: "application/json" } }),
+      loadLatestMessages()
+    ]);
     latestUpdateMessageId = updates.messages.reduce(
       (maximum, message) => Math.max(maximum, message.id),
       0
     );
-    resetHistory();
-    await loadLatestMessages();
     setStatus("Connected");
     window.setInterval(pollUpdates, CHAT_POLL_INTERVAL_MS);
   } catch (error) {
@@ -555,7 +726,11 @@ async function initializeConversation() {
       window.location.replace("./index.html");
     } else {
       console.error("Could not open this conversation.", error);
-      setStatus("Could not load this conversation. Check that the Python server is running.", true);
+      if (renderedMessages.size > 0) {
+        setStatus("Offline — showing chat history saved on this device.", true);
+      } else {
+        setStatus("Could not load this conversation. Check that the Python server is running.", true);
+      }
     }
   }
 }

@@ -19,7 +19,6 @@
 }
 
 body {
-  min-width: 320px;
   min-height: 100vh;
   min-height: 100dvh;
   margin: 0;
@@ -1195,6 +1194,124 @@ html.chat-fullscreen {
     }
   }
 
+  .notification-prompt {
+    width: min(100% - 28px, 440px);
+    max-width: 440px;
+    max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    margin: auto;
+    padding: clamp(22px, 6vw, 32px);
+    overflow-y: auto;
+    border: 1px solid #e0ebe6;
+    border-radius: 24px;
+    background:
+      radial-gradient(ellipse at 100% 0, rgb(232 246 240 / 76%), transparent 16rem),
+      #fff;
+    color: var(--ink);
+    box-shadow: 0 28px 90px rgb(20 48 40 / 24%);
+  }
+
+  .notification-prompt::backdrop {
+    background: rgb(14 32 28 / 55%);
+    backdrop-filter: blur(4px);
+  }
+
+  .notification-prompt-icon {
+    display: grid;
+    width: 48px;
+    height: 48px;
+    place-items: center;
+    margin-bottom: 19px;
+    border-radius: 16px;
+    background: #e8f5ef;
+    color: #147d70;
+  }
+
+  .notification-prompt-icon svg {
+    width: 25px;
+    height: 25px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+  }
+
+  .notification-prompt h2 {
+    margin: 9px 0;
+    color: #193a32;
+    font-size: clamp(23px, 6vw, 28px);
+    letter-spacing: -0.04em;
+    line-height: 1.15;
+  }
+
+  .notification-prompt > p:not(.eyebrow, .notification-prompt-status) {
+    margin: 0;
+    color: #61766e;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .notification-ios-install {
+    margin-top: 16px;
+    padding: 13px 14px;
+    border: 1px solid #d9ebe2;
+    border-radius: 14px;
+    background: #f3faf6;
+    color: #385d4e;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .notification-ios-install p {
+    margin: 4px 0 0;
+  }
+
+  .notification-prompt-status {
+    min-height: 18px;
+    margin: 11px 0 0;
+    color: #526b60;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .notification-prompt-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin-top: 13px;
+  }
+
+  .notification-prompt-actions .button {
+    min-height: 46px;
+    flex: 1 1 145px;
+    border-radius: 12px;
+  }
+
+  .notification-prompt-enable[hidden] {
+    display: none;
+  }
+
+  .notification-prompt button:focus-visible {
+    outline: 3px solid rgb(20 125 112 / 35%);
+    outline-offset: 3px;
+  }
+
+  @media (max-width: 420px) {
+    .notification-prompt {
+      width: calc(100% - 24px);
+      padding: 22px 20px;
+      border-radius: 21px;
+    }
+
+    .notification-prompt-actions {
+      flex-direction: column;
+    }
+
+    .notification-prompt-actions .button {
+      flex-basis: 44px;
+    }
+  }
+
   .conversation-body .chat-back-button {
     width: 40px;
     height: 44px;
@@ -1585,6 +1702,175 @@ textarea {
   line-height: 1.5;
 }
 
+.voice-note-player {
+  position: relative;
+  display: flex;
+  width: min(300px, 100%);
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  margin: 5px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid rgb(31 91 70 / 9%);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 64%);
+}
+
+.chat-message-own .voice-note-player {
+  border-color: rgb(31 91 70 / 10%);
+  background: rgb(255 255 255 / 46%);
+}
+
+.voice-note-play-button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: #168477;
+  color: #fff;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.voice-note-play-button:hover {
+  background: #106e64;
+}
+
+.voice-note-play-button:focus-visible {
+  outline: 3px solid rgb(20 125 112 / 32%);
+  outline-offset: 3px;
+}
+
+.voice-note-play-button svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.voice-pause-icon,
+.voice-note-player.is-playing .voice-play-icon {
+  display: none;
+}
+
+.voice-note-player.is-playing .voice-pause-icon {
+  display: block;
+}
+
+.voice-note-track-column {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.voice-note-waveform {
+  display: flex;
+  min-width: 0;
+  height: 30px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2px;
+  border-radius: 5px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.voice-note-waveform:focus-visible {
+  outline: 2px solid #168477;
+  outline-offset: 3px;
+}
+
+.voice-note-waveform span {
+  width: 3px;
+  min-width: 2px;
+  height: var(--wave-height);
+  max-height: 27px;
+  flex: 1 1 2px;
+  border-radius: 5px;
+  background: #9aaca5;
+  transition: background-color 100ms linear;
+}
+
+.voice-note-waveform span.is-played {
+  background: #168477;
+}
+
+.voice-note-timing {
+  display: flex;
+  justify-content: space-between;
+  color: #52635d;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.voice-note-player audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.conversation-body .chat-message-voice {
+  width: min(92%, 400px);
+  max-width: min(92%, 560px);
+}
+
+.conversation-body .voice-note-player {
+  width: 100%;
+  min-height: 68px;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.conversation-body .voice-note-play-button {
+  width: 44px;
+  height: 44px;
+}
+
+.conversation-body .voice-note-track-column {
+  gap: 6px;
+}
+
+.conversation-body .voice-note-waveform {
+  height: 36px;
+  gap: 3px;
+}
+
+.conversation-body .voice-note-waveform span {
+  max-height: 32px;
+}
+
+.install-app-button {
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.install-app-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.install-app-status {
+  max-width: 520px;
+  margin: -8px 0 10px auto;
+  color: #52635d;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+}
+
 @media (max-width: 680px) {
   .inbox-page .inbox-heading {
     padding-top: 42px;
@@ -1597,6 +1883,56 @@ textarea {
   .profile-card {
     padding: 34px 20px 24px;
     border-radius: 22px;
+  }
+
+  .inbox-page .topbar {
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .inbox-page .chat-account {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 7px;
+  }
+
+  .inbox-page .install-app-status {
+    margin-top: -4px;
+  }
+}
+
+@media (max-width: 420px) {
+  .conversation-body .chat-message-voice {
+    width: min(96%, 400px);
+    max-width: 96%;
+  }
+
+  .conversation-body .voice-note-player {
+    gap: 9px;
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .conversation-body .voice-note-waveform {
+    gap: 2px;
+  }
+
+  .inbox-page .chat-account-profile {
+    max-width: 100%;
+  }
+
+  .inbox-page .chat-account-name {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .inbox-page .install-app-button,
+  .inbox-page .signout-button {
+    min-height: 36px;
+    padding-right: 9px;
+    padding-left: 9px;
+    font-size: 11px;
   }
 }
 
@@ -1617,6 +1953,16 @@ textarea {
   .notification-settings {
     padding-right: 4px;
     padding-left: 4px;
+  }
+
+  .voice-note-player {
+    gap: 8px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .voice-note-waveform {
+    gap: 1px;
   }
 }
 

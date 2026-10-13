@@ -11,6 +11,7 @@
     <link rel="apple-touch-icon" href="./icons/icon-192.png">
     <link rel="stylesheet" href="./styles.css">
     <script src="./app.js" defer></script>
+    <script src="./chat-cache.js" defer></script>
     <script src="./inbox.js" defer></script>
   </head>
   <body data-page="inbox">
@@ -25,9 +26,14 @@
             <span class="conversation-avatar account-avatar" id="account-avatar" aria-hidden="true">?</span>
             <span class="chat-account-name" id="signed-in-username"></span>
           </a>
+          <button class="button button-quiet install-app-button" id="install-app-button" type="button" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17v3h14v-3" /></svg>
+            <span>Install app</span>
+          </button>
           <button class="button button-quiet signout-button" id="signout-button" type="button">Sign out</button>
         </div>
       </header>
+      <p class="install-app-status" id="install-app-status" role="status" aria-live="polite" hidden></p>
 
       <section class="inbox-heading" aria-labelledby="inbox-title">
         <p class="eyebrow">YOUR SPACE, YOUR PEOPLE</p>
@@ -64,5 +70,22 @@
       </section>
 
     </main>
+    <dialog class="notification-prompt" id="notification-prompt" aria-labelledby="notification-prompt-title" aria-describedby="notification-prompt-description">
+      <div class="notification-prompt-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></svg>
+      </div>
+      <p class="eyebrow">STAY IN THE LOOP</p>
+      <h2 id="notification-prompt-title">Never miss a message</h2>
+      <p id="notification-prompt-description">Allow notifications for new-message alerts. If this server has closed-app push configured, alerts can arrive while Murmur is closed. You can manage this any time in your profile.</p>
+      <div class="notification-ios-install" id="notification-ios-install" hidden>
+        <strong>One quick iPhone or iPad step</strong>
+        <p>In Safari, tap <strong>Share</strong>, choose <strong>Add to Home Screen</strong>, then open Murmur from its Home Screen icon. Notifications are supported in the installed app on iOS/iPadOS 16.4 or later.</p>
+      </div>
+      <p class="notification-prompt-status" id="notification-prompt-status" role="status" aria-live="polite"></p>
+      <div class="notification-prompt-actions">
+        <button class="button button-primary" id="notification-prompt-enable" type="button">Allow notifications</button>
+        <button class="button button-quiet" id="notification-prompt-dismiss" type="button">Not now</button>
+      </div>
+    </dialog>
   </body>
 </html>

@@ -10,6 +10,14 @@ const userSearchResults = document.querySelector("#user-search-results");
 const newChatStatus = document.querySelector("#new-chat-status");
 const chatStatus = document.querySelector("#chat-status");
 const startChatButton = newChatForm.querySelector('button[type="submit"]');
+const installAppButton = document.querySelector("#install-app-button");
+const installAppStatus = document.querySelector("#install-app-status");
+const notificationPrompt = document.querySelector("#notification-prompt");
+const notificationPromptDescription = document.querySelector("#notification-prompt-description");
+const notificationPromptStatus = document.querySelector("#notification-prompt-status");
+const notificationPromptEnable = document.querySelector("#notification-prompt-enable");
+const notificationPromptDismiss = document.querySelector("#notification-prompt-dismiss");
+const notificationIosInstall = document.querySelector("#notification-ios-install");
 
 let conversations = [];
 let currentUser;
@@ -19,8 +27,115 @@ let isPolling = false;
 let isOpeningConversation = false;
 let searchTimeout;
 let searchRequestId = 0;
+let notificationPromptKey;
 const CHAT_POLL_INTERVAL_MS = 3000;
 const USER_SEARCH_DELAY_MS = 180;
+
+function updateInstallButton() {
+  const installState = window.murmurInstallStatus;
+  installAppButton.hidden = !installState?.android || installState.installed;
+}
+
+function rememberNotificationPrompt(choice) {
+  try {
+    if (window.murmurNotificationPlatform?.isIos && !window.murmurNotificationPlatform.isStandalone) {
+      sessionStorage.setItem(notificationPromptKey, choice);
+    } else {
+      localStorage.setItem(notificationPromptKey, choice);
+    }
+  } catch (error) {
+    console.error("Could not save the notification prompt preference.", error);
+  }
+}
+
+function maybeShowNotificationPrompt() {
+  if (!window.isSecureContext) {
+    return;
+  }
+  const needsIosInstall = window.murmurNotificationPlatform?.isIos
+    && !window.murmurNotificationPlatform.isStandalone;
+  if (!("Notification" in window)) {
+    if (!needsIosInstall) {
+      return;
+    }
+  } else if (Notification.permission !== "default") {
+    return;
+  }
+  notificationPromptKey = `murmur-notification-prompt-v1-${currentUser.id}`;
+  try {
+    if (localStorage.getItem(notificationPromptKey) || sessionStorage.getItem(notificationPromptKey)) {
+      return;
+    }
+  } catch (error) {
+    console.error("Could not check the notification prompt preference.", error);
+  }
+
+  notificationIosInstall.hidden = !needsIosInstall;
+  notificationPromptEnable.hidden = needsIosInstall;
+  notificationPromptDismiss.textContent = needsIosInstall ? "Got it" : "Not now";
+  notificationPromptDescription.textContent = needsIosInstall
+    ? "To get notifications on an iPhone or iPad, first add Murmur to your Home Screen and open it from the installed app. Web notifications require iOS/iPadOS 16.4 or later."
+    : "Allow notifications for new-message alerts. If this server has closed-app push configured, alerts can arrive while Murmur is closed. You can manage this any time in your profile.";
+  notificationPrompt.showModal();
+}
+
+updateInstallButton();
+window.addEventListener("murmurinstallchange", updateInstallButton);
+
+notificationPromptDismiss.addEventListener("click", () => {
+  rememberNotificationPrompt("dismissed");
+  notificationPrompt.close();
+});
+
+notificationPrompt.addEventListener("cancel", () => {
+  rememberNotificationPrompt("dismissed");
+});
+
+notificationPromptEnable.addEventListener("click", async () => {
+  notificationPromptEnable.disabled = true;
+  notificationPromptStatus.textContent = "Requesting notification permission…";
+  notificationPromptStatus.classList.remove("status-error");
+  try {
+    const result = await window.murmurEnableNotifications();
+    rememberNotificationPrompt(result.permission === "granted" ? "enabled" : "dismissed");
+    notificationPrompt.close();
+    if (result.permission === "granted") {
+      setStatus(chatStatus, result.pushEnabled
+        ? "Notifications are enabled for new messages."
+        : "Notifications are allowed. Closed-app alerts are not configured on this server yet.");
+    } else {
+      setStatus(chatStatus, "Notifications were not allowed. You can change this in your browser or device settings.", true);
+    }
+  } catch (error) {
+    console.error("Could not enable message notifications.", error);
+    notificationPromptStatus.textContent = error.message || "Could not enable notifications. Check your browser and device settings.";
+    notificationPromptStatus.classList.add("status-error");
+  } finally {
+    notificationPromptEnable.disabled = false;
+  }
+});
+
+installAppButton.addEventListener("click", async () => {
+  installAppButton.disabled = true;
+  installAppStatus.hidden = false;
+  try {
+    const result = await window.murmurInstallApp();
+    if (result === "accepted") {
+      installAppStatus.textContent = "Murmur is being installed.";
+      window.murmurInstallStatus.installed = true;
+      updateInstallButton();
+    } else if (result === "dismissed") {
+      installAppStatus.textContent = "Installation was cancelled. You can install Murmur any time.";
+    } else {
+      installAppStatus.textContent = "To install Murmur, open your browser menu and choose Install app or Add to Home screen.";
+    }
+  } catch (error) {
+    console.error("Could not start app installation.", error);
+    installAppStatus.textContent = "Could not start installation. Open your browser menu and choose Install app or Add to Home screen.";
+  } finally {
+    installAppButton.disabled = false;
+  }
+});
 
 function setStatus(element, message, isError = false) {
   element.textContent = message;
@@ -336,6 +451,12 @@ signoutButton.addEventListener("click", async () => {
         }
       }
     }
+    try {
+      await window.MurmurChatCache.clear(currentUser.id);
+    } catch (error) {
+      console.error("Could not clear this account's private chat history from this device.", error);
+      throw new Error("Could not clear private chat history from this device. Please try again before signing out.");
+    }
     const response = await fetch("./api/logout", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -381,6 +502,7 @@ async function initializeInbox() {
     latestUpdateMessageId = data.messages.reduce((maximum, message) => Math.max(maximum, message.id), 0);
     setStatus(chatStatus, "Connected");
     window.setInterval(pollUpdates, CHAT_POLL_INTERVAL_MS);
+    maybeShowNotificationPrompt();
   } catch (error) {
     if (error.status === 401) {
       window.location.replace("./login.html");

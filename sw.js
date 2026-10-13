@@ -1,4 +1,4 @@
-const CACHE_NAME = "murmur-shell-v21";
+const CACHE_NAME = "murmur-shell-v27";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -9,6 +9,7 @@ const APP_SHELL = [
   "./styles.css",
   "./app.js",
   "./auth.js",
+  "./chat-cache.js",
   "./inbox.js",
   "./conversation.js",
   "./profile.js",

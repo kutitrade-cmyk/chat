@@ -44,6 +44,7 @@ BASE64URL_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 PUBLIC_FILES = {
     "app.js",
     "auth.js",
+    "chat-cache.js",
     "conversation.html",
     "conversation.js",
     "inbox.js",
@@ -589,7 +590,11 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
         if not subscriptions:
             return
 
-        from pywebpush import WebPushException, webpush
+        try:
+            from pywebpush import WebPushException, webpush
+        except ImportError:
+            self.log_error("Push notifications are configured, but pywebpush is not installed.")
+            return
 
         payload = json.dumps(
             {

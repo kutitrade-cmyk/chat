@@ -13,8 +13,8 @@ const testNotificationButton = document.querySelector("#test-notification");
 const notificationSettingsStatus = document.querySelector("#notification-settings-status");
 
 const MAX_PROFILE_IMAGE_SIZE = 200 * 1024 * 1024;
-let pushConfiguration;
 let pushSubscription;
+let pushConfiguration;
 
 function setProfileStatus(message, isError = false) {
   profileStatus.textContent = message;
@@ -26,12 +26,6 @@ function setNotificationStatus(message, isError = false) {
   notificationSettingsStatus.classList.toggle("status-error", isError);
 }
 
-function decodeApplicationServerKey(value) {
-  const padding = "=".repeat((4 - value.length % 4) % 4);
-  const decoded = atob((value + padding).replace(/-/g, "+").replace(/_/g, "/"));
-  return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
-}
-
 async function loadPushSettings() {
   if (!("Notification" in window) || !("serviceWorker" in navigator) || !window.isSecureContext) {
     enableNotificationsButton.hidden = true;
@@ -39,8 +33,15 @@ async function loadPushSettings() {
     setNotificationStatus("This browser or connection does not support secure web notifications.", true);
     return;
   }
-  if (!("PushManager" in window)) {
+  if (window.murmurNotificationPlatform?.isIos && !window.murmurNotificationPlatform.isStandalone) {
     enableNotificationsButton.hidden = true;
+    testNotificationButton.hidden = true;
+    setNotificationStatus("On iPhone or iPad, add Murmur to your Home Screen and open it from there before enabling notifications.");
+    return;
+  }
+  if (!("PushManager" in window)) {
+    enableNotificationsButton.hidden = Notification.permission === "denied";
+    enableNotificationsButton.textContent = "Enable notifications";
     testNotificationButton.hidden = Notification.permission !== "granted";
     setNotificationStatus("This browser can show notifications while Murmur is open but does not support closed-app push.");
     return;
@@ -82,12 +83,12 @@ async function loadPushSettings() {
     testNotificationButton.hidden = true;
     setNotificationStatus("Notifications are blocked. Allow them in your browser or device settings to enable alerts.", true);
   } else {
-    enableNotificationsButton.hidden = !pushConfiguration.enabled;
+    enableNotificationsButton.hidden = false;
     enableNotificationsButton.textContent = "Enable push notifications";
     testNotificationButton.hidden = true;
     setNotificationStatus(pushConfiguration.enabled
-      ? "Enable push notifications to get alerts even when Murmur is closed."
-      : "Push notifications are not configured by this server yet.");
+      ? "Enable notifications to receive new-message alerts, including when Murmur is closed."
+      : "Enable notifications to receive alerts while Murmur is open. Closed-app push is not configured on this server yet.");
   }
 }
 
@@ -111,49 +112,14 @@ enableNotificationsButton.addEventListener("click", async () => {
       pushSubscription = null;
       setNotificationStatus("Push notifications are turned off. Notifications while Murmur is open may still appear.");
     } else {
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
+      const result = await window.murmurEnableNotifications();
+      if (result.permission !== "granted") {
         await loadPushSettings();
         return;
       }
-      if (!pushConfiguration?.enabled || !pushConfiguration.public_key) {
-        throw new Error("Push notifications are not configured by this server.");
-      }
-      const registration = await navigator.serviceWorker.ready;
-      const applicationServerKey = decodeApplicationServerKey(pushConfiguration.public_key);
-      let subscription = await registration.pushManager.getSubscription();
-      const existingKey = subscription?.options.applicationServerKey;
-      const existingKeyBytes = existingKey ? new Uint8Array(existingKey) : null;
-      const keyMatches = existingKey
-        && existingKeyBytes.byteLength === applicationServerKey.byteLength
-        && applicationServerKey.every((byte, index) => byte === existingKeyBytes[index]);
-      if (subscription && !keyMatches) {
-        await subscription.unsubscribe();
-        subscription = null;
-      }
-      if (!subscription) {
-        subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey
-        });
-      }
-      pushSubscription = subscription;
-      try {
-        const response = await fetch("./api/me/push-subscriptions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify(subscription.toJSON())
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.error || "Could not enable push notifications.");
-        }
-      } catch (error) {
-        await subscription.unsubscribe();
-        pushSubscription = null;
-        throw error;
-      }
-      setNotificationStatus("Push notifications are enabled. New messages can alert you while Murmur is closed.");
+      setNotificationStatus(result.pushEnabled
+        ? "Push notifications are enabled. New messages can alert you while Murmur is closed."
+        : "Notifications are allowed on this device. Closed-app push is not configured on this server yet.");
     }
     await loadPushSettings();
   } catch (error) {
