@@ -15,7 +15,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 
 APP_DIR = Path(__file__).resolve().parent
-DATABASE_DIR = APP_DIR / "data"
+DATABASE_DIR = Path(
+    os.environ.get("MURMUR_DATA_DIR", APP_DIR / "data")
+).expanduser().resolve()
 DATABASE_PATH = DATABASE_DIR / "chat.sqlite3"
 MAX_MESSAGE_LENGTH = 2000
 MIN_USERNAME_LENGTH = 3
