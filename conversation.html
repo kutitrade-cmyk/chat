@@ -11,6 +11,7 @@
     <link rel="apple-touch-icon" href="./icons/icon-192.png">
     <link rel="stylesheet" href="./styles.css">
     <script src="./app.js" defer></script>
+    <script src="./conversation.js" defer></script>
   </head>
   <body class="conversation-body" data-page="conversation">
     <main class="page-shell conversation-shell">
@@ -36,8 +37,13 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5a5.5 5.5 0 0 1-5.5-5.5V7a4 4 0 0 1 8 0v8a2.5 2.5 0 0 1-5 0V8" /></svg>
           </label>
           <input class="visually-hidden" id="chat-image" type="file" accept="image/jpeg,image/png,image/webp">
+          <button class="voice-note-button" id="voice-note-button" type="button" aria-label="Record a voice note" title="Record a voice note">
+            <svg class="voice-note-microphone" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-5a3.5 3.5 0 0 0-7 0v5A3.5 3.5 0 0 0 12 15Zm0 0v5m-4 0h8m-11-9.5a7 7 0 0 0 14 0" /></svg>
+            <svg class="voice-note-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+          </button>
           <div class="chat-composer">
             <p class="chat-attachment-preview" id="chat-attachment-preview" hidden></p>
+            <p class="voice-recording-status" id="voice-recording-status" hidden aria-live="polite"></p>
             <label class="visually-hidden" for="chat-message">Write a message or image caption</label>
             <textarea id="chat-message" name="message" maxlength="2000" rows="1" placeholder="Message…" enterkeyhint="send"></textarea>
           </div>

@@ -828,6 +828,9 @@ html.chat-fullscreen {
   display: flex;
   min-height: 68px;
   flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 2;
   min-width: 0;
   gap: 8px;
   padding: calc(8px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 8px calc(14px + env(safe-area-inset-left));
@@ -955,6 +958,10 @@ html.chat-fullscreen {
 }
 
 .conversation-body .conversation-form {
+  position: relative;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   flex: 0 0 auto;
   min-width: 0;
   align-items: flex-end;
@@ -974,6 +981,84 @@ html.chat-fullscreen {
   color: #536471;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+}
+
+.voice-note-button {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #536471;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.voice-note-button:hover:not(:disabled),
+.voice-note-button:focus-visible {
+  background: #e9ecee;
+}
+
+.voice-note-button:focus-visible {
+  outline: 3px solid rgb(8 126 112 / 30%);
+  outline-offset: 2px;
+}
+
+.voice-note-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.voice-note-button svg {
+  width: 23px;
+  height: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.voice-note-stop {
+  display: none;
+}
+
+.voice-note-button.is-recording {
+  background: #fff0ee;
+  color: #bc4437;
+  animation: voice-recording-pulse 1.2s ease-in-out infinite;
+}
+
+.voice-note-button.is-recording .voice-note-microphone {
+  display: none;
+}
+
+.voice-note-button.is-recording .voice-note-stop {
+  display: block;
+}
+
+@keyframes voice-recording-pulse {
+  50% {
+    box-shadow: 0 0 0 5px rgb(188 68 55 / 12%);
+  }
+}
+
+.voice-recording-status {
+  margin: 7px 0 0;
+  color: #a33e34;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.chat-message-audio {
+  display: block;
+  width: min(300px, 100%);
+  height: 42px;
+  margin: 5px 0 1px;
 }
 
 .chat-attach-button:hover,
@@ -1104,6 +1189,12 @@ html.chat-fullscreen {
     padding-left: max(8px, env(safe-area-inset-left));
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .voice-note-button.is-recording {
+      animation: none;
+    }
+  }
+
   .conversation-body .chat-back-button {
     width: 40px;
     height: 44px;
@@ -1125,6 +1216,7 @@ html.chat-fullscreen {
   }
 
   .conversation-body .chat-attach-button,
+  .conversation-body .voice-note-button,
   .conversation-body .chat-send-button {
     width: 42px;
     height: 44px;
@@ -1537,7 +1629,8 @@ textarea {
 
   .conversation-body .chat-back-button,
   .conversation-body .chat-send-button,
-  .conversation-body .chat-attach-button {
+  .conversation-body .chat-attach-button,
+  .conversation-body .voice-note-button {
     height: 40px;
   }
 

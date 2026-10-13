@@ -268,7 +268,7 @@ async function showNotification(message) {
     serviceWorkerRegistration = await navigator.serviceWorker.ready;
   }
   await serviceWorkerRegistration.showNotification(`New message from ${message.sender}`, {
-    body: message.body || "You received an image.",
+    body: message.body || (message.audio_mime ? "You received a voice note." : "You received an image."),
     icon: "./icons/icon.svg",
     badge: "./icons/icon.svg",
     tag: `chat-message-${message.id}`,

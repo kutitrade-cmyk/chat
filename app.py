@@ -31,6 +31,7 @@ DEFAULT_MESSAGES_PER_REQUEST = 50
 MAX_REQUEST_BODY = 16384
 MAX_PUSH_ENDPOINT_LENGTH = 2048
 MAX_IMAGE_UPLOAD_BYTES = 200 * 1024 * 1024
+MAX_VOICE_NOTE_BYTES = 10 * 1024 * 1024
 IMAGE_TYPES = {
     "image/jpeg": (b"\xff\xd8\xff", ".jpg"),
     "image/png": (b"\x89PNG\r\n\x1a\n", ".png"),
@@ -75,7 +76,9 @@ def initialize_database():
                 created_at TEXT NOT NULL,
                 user_id INTEGER REFERENCES users(id),
                 image_file TEXT,
-                image_mime TEXT
+                image_mime TEXT,
+                audio_file TEXT,
+                audio_mime TEXT
             )
             """
         )
@@ -90,6 +93,10 @@ def initialize_database():
             connection.execute("ALTER TABLE messages ADD COLUMN image_file TEXT")
         if "image_mime" not in message_columns:
             connection.execute("ALTER TABLE messages ADD COLUMN image_mime TEXT")
+        if "audio_file" not in message_columns:
+            connection.execute("ALTER TABLE messages ADD COLUMN audio_file TEXT")
+        if "audio_mime" not in message_columns:
+            connection.execute("ALTER TABLE messages ADD COLUMN audio_mime TEXT")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -188,6 +195,8 @@ def serialize_message(row):
         message["read_by_recipient"] = row[5] >= row[0]
     if len(row) > 6 and row[6]:
         message["image_mime"] = row[6]
+    if len(row) > 7 and row[7]:
+        message["audio_mime"] = row[7]
     return message
 
 
@@ -270,6 +279,13 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                 conversation_id, message_id = conversation_image_route
                 self.get_conversation_image(conversation_id, message_id, user)
             return
+        conversation_audio_route = self.conversation_audio_route(request.path)
+        if conversation_audio_route:
+            user = self.require_authenticated_user()
+            if user is not None:
+                conversation_id, message_id = conversation_audio_route
+                self.get_conversation_audio(conversation_id, message_id, user)
+            return
         if request.path == "/api/updates":
             user = self.require_authenticated_user()
             if user is not None:
@@ -322,6 +338,20 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
         return None
 
     @staticmethod
+    def conversation_audio_route(path):
+        segments = path.strip("/").split("/")
+        if (
+            len(segments) == 5
+            and segments[0] == "api"
+            and segments[1] == "conversations"
+            and segments[2].isdigit()
+            and segments[3] == "audio"
+            and segments[4].isdigit()
+        ):
+            return int(segments[2]), int(segments[4])
+        return None
+
+    @staticmethod
     def conversation_upload_route(path):
         segments = path.strip("/").split("/")
         if (
@@ -330,6 +360,19 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
             and segments[1] == "conversations"
             and segments[2].isdigit()
             and segments[3] == "images"
+        ):
+            return int(segments[2])
+        return None
+
+    @staticmethod
+    def conversation_audio_upload_route(path):
+        segments = path.strip("/").split("/")
+        if (
+            len(segments) == 4
+            and segments[0] == "api"
+            and segments[1] == "conversations"
+            and segments[2].isdigit()
+            and segments[3] == "audio"
         ):
             return int(segments[2])
         return None
@@ -916,7 +959,11 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                         other.id AS user_id,
                         other.username,
                         other.avatar_file IS NOT NULL AS has_avatar,
-                        CASE WHEN last.image_file IS NOT NULL THEN 'Photo' ELSE last.body END AS last_message,
+                        CASE
+                            WHEN last.image_file IS NOT NULL THEN 'Photo'
+                            WHEN last.audio_file IS NOT NULL THEN 'Voice message'
+                            ELSE last.body
+                        END AS last_message,
                         last.created_at AS last_message_at,
                         (
                             SELECT COUNT(*)
@@ -1038,15 +1085,39 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
             self.log_error("Could not load chat image metadata.")
             self.send_json(500, {"error": "The chat image is temporarily unavailable."})
 
-    def send_private_image(self, filename, content_type):
-        upload_dir = (DATABASE_DIR / "uploads").resolve()
-        image_path = (upload_dir / filename).resolve()
-        if image_path.parent != upload_dir or not image_path.is_file():
-            self.send_json(404, {"error": "Image not found."})
+    def get_conversation_audio(self, conversation_id, message_id, user):
+        if not self.require_conversation_membership(conversation_id, user):
             return
         try:
-            file_size = image_path.stat().st_size
-            with image_path.open("rb") as image_file:
+            with sqlite3.connect(DATABASE_PATH) as connection:
+                audio = connection.execute(
+                    """
+                    SELECT audio_file, audio_mime
+                    FROM messages
+                    WHERE id = ? AND conversation_id = ?
+                    """,
+                    (message_id, conversation_id),
+                ).fetchone()
+            if audio is None or not audio[0]:
+                self.send_json(404, {"error": "Voice note not found."})
+                return
+            self.send_private_media(audio[0], audio[1])
+        except sqlite3.Error:
+            self.log_error("Could not load voice note metadata.")
+            self.send_json(500, {"error": "The voice note is temporarily unavailable."})
+
+    def send_private_image(self, filename, content_type):
+        self.send_private_media(filename, content_type)
+
+    def send_private_media(self, filename, content_type):
+        upload_dir = (DATABASE_DIR / "uploads").resolve()
+        media_path = (upload_dir / filename).resolve()
+        if media_path.parent != upload_dir or not media_path.is_file():
+            self.send_json(404, {"error": "Media not found."})
+            return
+        try:
+            file_size = media_path.stat().st_size
+            with media_path.open("rb") as media_file:
                 self.send_response(200)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(file_size))
@@ -1055,12 +1126,12 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Disposition", "inline")
                 self.end_headers()
                 while True:
-                    chunk = image_file.read(64 * 1024)
+                    chunk = media_file.read(64 * 1024)
                     if not chunk:
                         break
                     self.wfile.write(chunk)
         except OSError:
-            self.log_error("Could not read private image %s.", image_path.name)
+            self.log_error("Could not read private media %s.", media_path.name)
 
     def get_updates(self, query, user):
         try:
@@ -1084,7 +1155,8 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                             WHERE other.conversation_id = m.conversation_id
                                 AND other.user_id != ?
                         ), 0) AS read_through,
-                        m.image_mime
+                        m.image_mime,
+                        m.audio_mime
                     FROM messages AS m
                     JOIN conversation_members AS member
                         ON member.conversation_id = m.conversation_id
@@ -1099,7 +1171,7 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                 {
                     "messages": [
                         {
-                            **serialize_message(tuple(row[:5]) + (row[6], row[7])),
+                            **serialize_message(tuple(row[:5]) + (row[6], row[7], row[8])),
                             "conversation_id": row[5],
                         }
                         for row in rows
@@ -1163,7 +1235,8 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                             WHERE other.conversation_id = m.conversation_id
                                 AND other.user_id != ?
                         ), 0) AS read_through,
-                        m.image_mime
+                        m.image_mime,
+                        m.audio_mime
                     FROM messages AS m
                     WHERE m.conversation_id = ? AND m.id > ?
                     ORDER BY m.id ASC LIMIT ?
@@ -1186,9 +1259,10 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                             WHERE other.conversation_id = m.conversation_id
                                 AND other.user_id != ?
                         ), 0) AS read_through,
-                        m.image_mime
+                        m.image_mime,
+                        m.audio_mime
                     FROM (
-                        SELECT id, sender, body, created_at, user_id, conversation_id, image_mime
+                        SELECT id, sender, body, created_at, user_id, conversation_id, image_mime, audio_mime
                         FROM messages
                         WHERE conversation_id = ? AND id < ?
                         ORDER BY id DESC LIMIT ?
@@ -1210,9 +1284,10 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                             WHERE other.conversation_id = m.conversation_id
                                 AND other.user_id != ?
                         ), 0) AS read_through,
-                        m.image_mime
+                        m.image_mime,
+                        m.audio_mime
                     FROM (
-                        SELECT id, sender, body, created_at, user_id, conversation_id, image_mime
+                        SELECT id, sender, body, created_at, user_id, conversation_id, image_mime, audio_mime
                         FROM messages
                         WHERE conversation_id = ?
                         ORDER BY id DESC LIMIT ?
@@ -1244,6 +1319,7 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
         request_path = urlsplit(self.path).path
         conversation_route = self.conversation_route(request_path)
         conversation_upload_id = self.conversation_upload_route(request_path)
+        conversation_audio_id = self.conversation_audio_upload_route(request_path)
         is_avatar_upload = request_path == "/api/me/avatar"
         is_push_subscription = request_path == "/api/me/push-subscriptions"
         if request_path not in (
@@ -1254,17 +1330,21 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
         ) and not is_push_subscription and not (
             conversation_route and conversation_route[1] in ("messages", "read")
         ) and not (
-            conversation_upload_id is not None or is_avatar_upload
+            conversation_upload_id is not None
+            or conversation_audio_id is not None
+            or is_avatar_upload
         ):
             self.send_json(404, {"error": "Not found."})
             return
 
-        if conversation_upload_id is not None or is_avatar_upload:
+        if conversation_upload_id is not None or conversation_audio_id is not None or is_avatar_upload:
             user = self.require_authenticated_user()
             if user is None:
                 return
             if is_avatar_upload:
                 self.save_user_avatar(user)
+            elif conversation_audio_id is not None:
+                self.create_conversation_audio(conversation_audio_id, user)
             else:
                 self.create_conversation_image(
                     conversation_upload_id,
@@ -1399,6 +1479,72 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
             if "temp_path" in locals() and temp_path.exists():
                 temp_path.unlink()
 
+    def store_uploaded_audio(self):
+        content_type = self.headers.get_content_type().lower()
+        audio_types = {
+            "audio/webm": (b"\x1aE\xdf\xa3", ".webm"),
+            "audio/ogg": (b"OggS", ".ogg"),
+            "audio/mp4": (b"ftyp", ".m4a"),
+            "audio/mpeg": (b"ID3", ".mp3"),
+        }
+        if content_type not in audio_types:
+            self.send_json(415, {"error": "This browser's voice-note format is not supported."})
+            return None
+
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self.send_json(400, {"error": "Invalid voice-note size."})
+            return None
+        if content_length < 1:
+            self.send_json(400, {"error": "Record a voice note before sending it."})
+            return None
+        if content_length > MAX_VOICE_NOTE_BYTES:
+            self.send_json(413, {"error": "Voice notes must be no larger than 10 MB."})
+            return None
+
+        upload_dir = DATABASE_DIR / "uploads"
+        try:
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=upload_dir, delete=False) as temp_file:
+                temp_path = Path(temp_file.name)
+                remaining = content_length
+                signature = bytearray()
+                while remaining:
+                    chunk = self.rfile.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        self.send_json(400, {"error": "The voice-note upload was incomplete."})
+                        return None
+                    if len(signature) < 12:
+                        signature.extend(chunk[:12 - len(signature)])
+                    temp_file.write(chunk)
+                    remaining -= len(chunk)
+
+            if content_type == "audio/mp4":
+                valid_audio = signature[4:8] == audio_types[content_type][0]
+            elif content_type == "audio/mpeg":
+                valid_audio = (
+                    signature.startswith(audio_types[content_type][0])
+                    or (len(signature) > 1 and signature[0] == 0xFF and signature[1] & 0xE0 == 0xE0)
+                )
+            else:
+                valid_audio = signature.startswith(audio_types[content_type][0])
+            if not valid_audio:
+                self.send_json(415, {"error": "The recorded file is not valid audio."})
+                return None
+
+            extension = audio_types[content_type][1]
+            filename = f"{secrets.token_hex(24)}{extension}"
+            os.replace(temp_path, upload_dir / filename)
+            return filename, content_type
+        except OSError:
+            self.log_error("Could not save uploaded voice note.")
+            self.send_json(500, {"error": "The voice note could not be saved. Please try again."})
+            return None
+        finally:
+            if "temp_path" in locals() and temp_path.exists():
+                temp_path.unlink()
+
     def save_user_avatar(self, user):
         uploaded = self.store_uploaded_image()
         if uploaded is None:
@@ -1480,6 +1626,53 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                 self.log_error("Could not remove an unsaved chat image.")
             self.log_error("Could not save chat image to the database.")
             self.send_json(500, {"error": "The image could not be sent. Please try again."})
+
+    def create_conversation_audio(self, conversation_id, user):
+        if not self.require_conversation_membership(conversation_id, user):
+            return
+
+        uploaded = self.store_uploaded_audio()
+        if uploaded is None:
+            return
+        filename, content_type = uploaded
+        created_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        try:
+            with sqlite3.connect(DATABASE_PATH) as connection:
+                cursor = connection.execute(
+                    """
+                    INSERT INTO messages
+                        (sender, client_id, body, created_at, user_id, conversation_id, audio_file, audio_mime)
+                    VALUES (?, ?, '', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user["username"],
+                        str(user["id"]),
+                        created_at,
+                        user["id"],
+                        conversation_id,
+                        filename,
+                        content_type,
+                    ),
+                )
+                row = connection.execute(
+                    """
+                    SELECT id, sender, body, created_at, user_id, audio_mime
+                    FROM messages WHERE id = ?
+                    """,
+                    (cursor.lastrowid,),
+                ).fetchone()
+            self.send_push_notifications(conversation_id, user, row[0])
+            self.send_json(
+                201,
+                {"message": serialize_message(tuple(row[:5]) + (0, None, row[5]))},
+            )
+        except sqlite3.Error:
+            try:
+                (DATABASE_DIR / "uploads" / filename).unlink(missing_ok=True)
+            except OSError:
+                self.log_error("Could not remove an unsaved voice note.")
+            self.log_error("Could not save voice note metadata to the database.")
+            self.send_json(500, {"error": "The voice note could not be sent. Please try again."})
 
     def serve_static_file(self, request_path):
         relative_path = unquote(request_path).lstrip("/") or "index.html"

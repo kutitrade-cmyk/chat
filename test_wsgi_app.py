@@ -67,6 +67,19 @@ class WsgiApplicationTests(unittest.TestCase):
             headers["HTTP_COOKIE"] = cookie
         return self.request(path, method="POST", body=body, headers=headers)
 
+    def post_media(self, path, body, content_type, cookie):
+        return self.request(
+            path,
+            method="POST",
+            body=body,
+            headers={
+                "CONTENT_TYPE": content_type,
+                "CONTENT_LENGTH": str(len(body)),
+                "HTTP_ORIGIN": "https://murmur.pythonanywhere.com",
+                "HTTP_COOKIE": cookie,
+            },
+        )
+
     def signup(self, username):
         response = self.post_json(
             "/api/signup",
@@ -185,6 +198,60 @@ class WsgiApplicationTests(unittest.TestCase):
                     os.environ.pop(name, None)
                 else:
                     os.environ[name] = value
+
+    def test_voice_notes_are_stored_and_only_conversation_members_can_read_them(self):
+        sender_cookie = self.signup("voicesender")
+        recipient_cookie = self.signup("voicerecipient")
+        outsider_cookie = self.signup("voiceoutsider")
+        conversation_response = self.post_json(
+            "/api/conversations",
+            {"username": "voicerecipient"},
+            sender_cookie,
+        )
+        self.assertTrue(conversation_response["status"].startswith("200 "))
+        conversation_id = json.loads(conversation_response["body"])["conversation_id"]
+
+        audio_bytes = b"\x1a\x45\xdf\xa3voice-note-test"
+        sent = self.post_media(
+            f"/api/conversations/{conversation_id}/audio",
+            audio_bytes,
+            "audio/webm;codecs=opus",
+            sender_cookie,
+        )
+        self.assertTrue(sent["status"].startswith("201 "))
+        message = json.loads(sent["body"])["message"]
+        self.assertEqual(message["audio_mime"], "audio/webm")
+
+        history = self.request(
+            f"/api/conversations/{conversation_id}/messages",
+            headers={"HTTP_COOKIE": recipient_cookie},
+        )
+        self.assertTrue(history["status"].startswith("200 "))
+        self.assertEqual(json.loads(history["body"])["messages"][0]["audio_mime"], "audio/webm")
+
+        updates = self.request(
+            "/api/updates?after_id=0",
+            headers={"HTTP_COOKIE": recipient_cookie},
+        )
+        self.assertTrue(updates["status"].startswith("200 "))
+        self.assertEqual(json.loads(updates["body"])["messages"][0]["audio_mime"], "audio/webm")
+
+        audio_path = f"/api/conversations/{conversation_id}/audio/{message['id']}"
+        downloaded = self.request(audio_path, headers={"HTTP_COOKIE": recipient_cookie})
+        self.assertTrue(downloaded["status"].startswith("200 "))
+        self.assertEqual(downloaded["headers"]["Content-Type"], "audio/webm")
+        self.assertEqual(downloaded["body"], audio_bytes)
+
+        hidden_from_outsider = self.request(audio_path, headers={"HTTP_COOKIE": outsider_cookie})
+        self.assertTrue(hidden_from_outsider["status"].startswith("404 "))
+
+        invalid_upload = self.post_media(
+            f"/api/conversations/{conversation_id}/audio",
+            b"not-a-valid-audio",
+            "audio/webm",
+            sender_cookie,
+        )
+        self.assertTrue(invalid_upload["status"].startswith("415 "))
 
 
 if __name__ == "__main__":

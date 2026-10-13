@@ -11,7 +11,7 @@ python -m pip install -r requirements.txt
 python app.py
 ```
 
-Then open <http://localhost:8000>. New users can register at `/register.html`; existing users sign in at `/login.html`. After signing in, the inbox is at `/index.html`. Search for a username in the inbox and select a result to start a private conversation; you can also submit a complete username directly. In a chat, select the other person's profile to view it; select your own profile from the inbox to add or change your photo. Chats support text and JPEG, PNG, and WebP image messages, up to 200 MB per image. Uploaded photos and images are stored privately under `data/uploads`; messages and account records are saved in `data/chat.sqlite3`. Password hashes are salted and derived with PBKDF2-HMAC-SHA256. The development server binds to `127.0.0.1` by default.
+Then open <http://localhost:8000>. New users can register at `/register.html`; existing users sign in at `/login.html`. After signing in, the inbox is at `/index.html`. Search for a username in the inbox and select a result to start a private conversation; you can also submit a complete username directly. In a chat, select the other person's profile to view it; select your own profile from the inbox to add or change your photo. Chats support text, JPEG/PNG/WebP images (up to 200 MB), and recorded voice notes (up to three minutes and 10 MB). Voice recording requires microphone permission and a browser with MediaRecorder support. Uploaded photos, images, and voice notes are stored privately under `data/uploads`; messages and account records are saved in `data/chat.sqlite3`. Password hashes are salted and derived with PBKDF2-HMAC-SHA256. The development server binds to `127.0.0.1` by default.
 
 ## Deploying on PythonAnywhere
 

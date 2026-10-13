@@ -5,7 +5,9 @@ const chatEmpty = document.querySelector("#chat-empty");
 const chatForm = document.querySelector("#chat-form");
 const chatMessageInput = document.querySelector("#chat-message");
 const chatImageInput = document.querySelector("#chat-image");
+const voiceNoteButton = document.querySelector("#voice-note-button");
 const attachmentPreview = document.querySelector("#chat-attachment-preview");
+const voiceRecordingStatus = document.querySelector("#voice-recording-status");
 const sendMessageButton = document.querySelector("#send-message-button");
 const loadOlderButton = document.querySelector("#load-older-button");
 const chatStatus = document.querySelector("#chat-status");
@@ -15,6 +17,13 @@ const threadProfileLink = document.querySelector("#thread-profile-link");
 const CHAT_PAGE_SIZE = 50;
 const CHAT_POLL_INTERVAL_MS = 3000;
 const MAX_IMAGE_SIZE = 200 * 1024 * 1024;
+const MAX_VOICE_NOTE_SIZE = 10 * 1024 * 1024;
+const MAX_VOICE_NOTE_DURATION_MS = 3 * 60 * 1000;
+const VOICE_NOTE_MIME_TYPES = [
+  "audio/webm;codecs=opus",
+  "audio/ogg;codecs=opus",
+  "audio/mp4"
+];
 const renderedMessages = new Map();
 const visualViewport = window.visualViewport;
 let currentUser;
@@ -23,6 +32,11 @@ let latestUpdateMessageId = 0;
 let oldestMessageId;
 let isPolling = false;
 let isLoadingOlderMessages = false;
+let voiceRecorder;
+let voiceStream;
+let voiceChunks = [];
+let voiceRecordingStartedAt = 0;
+let voiceRecordingTimer;
 
 function updateChatViewportHeight() {
   const height = visualViewport?.height || window.innerHeight;
@@ -110,6 +124,15 @@ function renderMessage(message, prepend = false) {
     imageLink.append(image);
     article.append(imageLink);
   }
+  if (message.audio_mime) {
+    const audio = document.createElement("audio");
+    audio.className = "chat-message-audio";
+    audio.controls = true;
+    audio.preload = "none";
+    audio.src = `./api/conversations/${conversationId}/audio/${message.id}`;
+    audio.setAttribute("aria-label", `Voice note from ${message.sender}`);
+    article.append(audio);
+  }
   if (message.body) {
     article.append(body);
   }
@@ -180,7 +203,9 @@ async function loadLatestMessages(markAsRead = !document.hidden) {
   }
   updatePagination(messages);
   if (messages.length > 0 && markAsRead) {
-    await markRead(messages[messages.length - 1].id);
+    markRead(messages[messages.length - 1].id).catch((error) => {
+      console.error("Could not mark conversation messages as read.", error);
+    });
   }
   chatHistory.scrollTop = chatHistory.scrollHeight;
   return messages;
@@ -216,7 +241,7 @@ async function showIncomingNotification(message) {
   }
   const registration = await navigator.serviceWorker.ready;
   await registration.showNotification(`New message from ${message.sender}`, {
-    body: message.body || "You received an image.",
+    body: message.body || (message.audio_mime ? "You received a voice note." : "You received an image."),
     icon: "./icons/icon.svg",
     badge: "./icons/icon.svg",
     tag: `chat-message-${message.id}`,
@@ -314,6 +339,9 @@ chatForm.addEventListener("submit", async (event) => {
     }
   } finally {
     sendMessageButton.disabled = false;
+    chatMessageInput.disabled = false;
+    chatImageInput.disabled = false;
+    voiceNoteButton.disabled = false;
     chatMessageInput.focus();
   }
 });
@@ -348,6 +376,127 @@ backToChatsButton.addEventListener("click", () => {
   window.location.href = "./index.html";
 });
 
+function stopVoiceRecording() {
+  if (voiceRecorder && voiceRecorder.state === "recording") {
+    voiceRecorder.stop();
+  }
+}
+
+function formatRecordingTime(milliseconds) {
+  const seconds = Math.floor(milliseconds / 1000);
+  return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+async function uploadVoiceNote(blob) {
+  if (!blob.size || blob.size > MAX_VOICE_NOTE_SIZE) {
+    sendMessageButton.disabled = false;
+    chatMessageInput.disabled = false;
+    chatImageInput.disabled = false;
+    voiceNoteButton.disabled = false;
+    setStatus("Voice notes must be between 1 byte and 10 MB.", true);
+    return;
+  }
+
+  sendMessageButton.disabled = true;
+  voiceNoteButton.disabled = true;
+  setStatus("Sending voice note…");
+  try {
+    const contentType = blob.type.split(";")[0];
+    const data = await requestJson(`./api/conversations/${conversationId}/audio`, {
+      method: "POST",
+      headers: { "Content-Type": contentType, Accept: "application/json" },
+      body: blob
+    });
+    renderMessage(data.message);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+    setStatus("Connected");
+  } catch (error) {
+    if (error.status === 401) {
+      window.location.replace("./login.html");
+    } else {
+      console.error("Could not send the voice note.", error);
+      setStatus(error.message || "Your voice note could not be sent. Please try again.", true);
+    }
+  } finally {
+    sendMessageButton.disabled = false;
+    chatMessageInput.disabled = false;
+    chatImageInput.disabled = false;
+    voiceNoteButton.disabled = false;
+  }
+}
+
+voiceNoteButton.addEventListener("click", async () => {
+  if (voiceRecorder?.state === "recording") {
+    stopVoiceRecording();
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || !("MediaRecorder" in window)) {
+    setStatus("This browser does not support recording voice notes.", true);
+    return;
+  }
+  if (chatMessageInput.value.trim() || chatImageInput.files.length) {
+    setStatus("Send or clear your current message before recording a voice note.", true);
+    return;
+  }
+
+  voiceNoteButton.disabled = true;
+  try {
+    voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mimeType = typeof MediaRecorder.isTypeSupported === "function"
+      ? VOICE_NOTE_MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type))
+      : undefined;
+    voiceRecorder = mimeType
+      ? new MediaRecorder(voiceStream, { mimeType })
+      : new MediaRecorder(voiceStream);
+    voiceChunks = [];
+    voiceRecorder.addEventListener("dataavailable", (event) => {
+      if (event.data.size > 0) {
+        voiceChunks.push(event.data);
+      }
+    });
+    voiceRecorder.addEventListener("stop", () => {
+      window.clearInterval(voiceRecordingTimer);
+      voiceStream.getTracks().forEach((track) => track.stop());
+      voiceStream = undefined;
+      voiceNoteButton.classList.remove("is-recording");
+      voiceNoteButton.setAttribute("aria-label", "Record a voice note");
+      voiceNoteButton.title = "Record a voice note";
+      voiceRecordingStatus.hidden = true;
+      voiceRecordingStatus.textContent = "";
+      const blob = new Blob(voiceChunks, { type: voiceRecorder.mimeType || mimeType });
+      voiceChunks = [];
+      uploadVoiceNote(blob);
+    }, { once: true });
+    voiceRecorder.start();
+    voiceRecordingStartedAt = Date.now();
+    voiceNoteButton.classList.add("is-recording");
+    voiceNoteButton.setAttribute("aria-label", "Stop and send voice note");
+    voiceNoteButton.title = "Stop and send voice note";
+    chatMessageInput.disabled = true;
+    chatImageInput.disabled = true;
+    sendMessageButton.disabled = true;
+    voiceRecordingStatus.hidden = false;
+    const updateRecordingStatus = () => {
+      const elapsed = Date.now() - voiceRecordingStartedAt;
+      voiceRecordingStatus.textContent = `Recording ${formatRecordingTime(elapsed)} · tap stop to send`;
+      if (elapsed >= MAX_VOICE_NOTE_DURATION_MS) {
+        stopVoiceRecording();
+      }
+    };
+    updateRecordingStatus();
+    voiceRecordingTimer = window.setInterval(updateRecordingStatus, 1000);
+  } catch (error) {
+    console.error("Could not start voice-note recording.", error);
+    voiceStream?.getTracks().forEach((track) => track.stop());
+    voiceStream = undefined;
+    setStatus(error.name === "NotAllowedError"
+      ? "Microphone access was denied. Allow it in your browser settings to record a voice note."
+      : "Could not start recording. Check your microphone and try again.", true);
+  } finally {
+    voiceNoteButton.disabled = false;
+  }
+});
+
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     pollUpdates();
@@ -356,22 +505,24 @@ document.addEventListener("visibilitychange", () => {
 
 async function initializeConversation() {
   try {
-    const userData = await requestJson("./api/me", { headers: { Accept: "application/json" } });
+    const conversationIdFromUrl = Number(new URLSearchParams(window.location.search).get("conversation"));
+    if (!Number.isInteger(conversationIdFromUrl) || conversationIdFromUrl < 1) {
+      window.location.replace("./index.html");
+      return;
+    }
+    conversationId = conversationIdFromUrl;
+
+    const [userData, conversationsData, updates] = await Promise.all([
+      requestJson("./api/me", { headers: { Accept: "application/json" } }),
+      requestJson("./api/conversations", { headers: { Accept: "application/json" } }),
+      requestJson("./api/updates?after_id=0", { headers: { Accept: "application/json" } })
+    ]);
     if (!userData.user) {
       window.location.replace("./login.html");
       return;
     }
     currentUser = userData.user;
 
-    conversationId = Number(new URLSearchParams(window.location.search).get("conversation"));
-    if (!Number.isInteger(conversationId) || conversationId < 1) {
-      window.location.replace("./index.html");
-      return;
-    }
-
-    const conversationsData = await requestJson("./api/conversations", {
-      headers: { Accept: "application/json" }
-    });
     const conversation = conversationsData.conversations.find((item) => item.id === conversationId);
     if (!conversation) {
       window.location.replace("./index.html");
@@ -389,9 +540,6 @@ async function initializeConversation() {
       threadAvatar.append(avatar);
     }
 
-    const updates = await requestJson("./api/updates?after_id=0", {
-      headers: { Accept: "application/json" }
-    });
     latestUpdateMessageId = updates.messages.reduce(
       (maximum, message) => Math.max(maximum, message.id),
       0
