@@ -16,12 +16,23 @@ const CHAT_PAGE_SIZE = 50;
 const CHAT_POLL_INTERVAL_MS = 3000;
 const MAX_IMAGE_SIZE = 200 * 1024 * 1024;
 const renderedMessages = new Map();
+const visualViewport = window.visualViewport;
 let currentUser;
 let conversationId;
 let latestUpdateMessageId = 0;
 let oldestMessageId;
 let isPolling = false;
 let isLoadingOlderMessages = false;
+
+function updateChatViewportHeight() {
+  const height = visualViewport?.height || window.innerHeight;
+  document.documentElement.style.setProperty("--chat-viewport-height", `${height}px`);
+}
+
+updateChatViewportHeight();
+visualViewport?.addEventListener("resize", updateChatViewportHeight);
+window.addEventListener("resize", updateChatViewportHeight);
+window.addEventListener("orientationchange", updateChatViewportHeight);
 
 function setStatus(message, isError = false) {
   chatStatus.textContent = message;

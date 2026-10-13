@@ -13,6 +13,8 @@ const testNotificationButton = document.querySelector("#test-notification");
 const notificationSettingsStatus = document.querySelector("#notification-settings-status");
 
 const MAX_PROFILE_IMAGE_SIZE = 200 * 1024 * 1024;
+let pushConfiguration;
+let pushSubscription;
 
 function setProfileStatus(message, isError = false) {
   profileStatus.textContent = message;
@@ -24,37 +26,139 @@ function setNotificationStatus(message, isError = false) {
   notificationSettingsStatus.classList.toggle("status-error", isError);
 }
 
-function updateNotificationControls() {
+function decodeApplicationServerKey(value) {
+  const padding = "=".repeat((4 - value.length % 4) % 4);
+  const decoded = atob((value + padding).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(decoded, (character) => character.charCodeAt(0));
+}
+
+async function loadPushSettings() {
   if (!("Notification" in window) || !("serviceWorker" in navigator) || !window.isSecureContext) {
     enableNotificationsButton.hidden = true;
     testNotificationButton.hidden = true;
     setNotificationStatus("This browser or connection does not support secure web notifications.", true);
     return;
   }
-
-  if (Notification.permission === "granted") {
+  if (!("PushManager" in window)) {
     enableNotificationsButton.hidden = true;
+    testNotificationButton.hidden = Notification.permission !== "granted";
+    setNotificationStatus("This browser can show notifications while Murmur is open but does not support closed-app push.");
+    return;
+  }
+
+  try {
+    const response = await fetch("./api/me/push-config", { headers: { Accept: "application/json" } });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Could not load push notification settings.");
+    }
+    pushConfiguration = data;
+    const registration = await navigator.serviceWorker.ready;
+    pushSubscription = await registration.pushManager.getSubscription();
+  } catch (error) {
+    console.error("Could not load push notification settings.", error);
+    enableNotificationsButton.hidden = true;
+    testNotificationButton.hidden = Notification.permission !== "granted";
+    setNotificationStatus("Could not load push notification settings. Check your connection and try again.", true);
+    return;
+  }
+
+  if (pushSubscription) {
+    enableNotificationsButton.hidden = false;
+    enableNotificationsButton.textContent = "Turn off push notifications";
+    testNotificationButton.hidden = Notification.permission !== "granted";
+    setNotificationStatus("A push subscription is active. Turn it off here to stop closed-app alerts.");
+  } else if (Notification.permission === "granted") {
+    enableNotificationsButton.hidden = !pushConfiguration.enabled;
+    enableNotificationsButton.textContent = "Enable push notifications";
     testNotificationButton.hidden = false;
-    setNotificationStatus("Notifications are enabled while Murmur is open in a background tab.");
+    if (!pushConfiguration.enabled) {
+      setNotificationStatus("This server is not configured for closed-app push yet. Notifications while Murmur is open still work.");
+    } else {
+      setNotificationStatus("Browser notifications are allowed. Enable push to receive alerts while Murmur is closed.");
+    }
   } else if (Notification.permission === "denied") {
     enableNotificationsButton.hidden = true;
     testNotificationButton.hidden = true;
     setNotificationStatus("Notifications are blocked. Allow them in your browser or device settings to enable alerts.", true);
   } else {
-    enableNotificationsButton.hidden = false;
+    enableNotificationsButton.hidden = !pushConfiguration.enabled;
+    enableNotificationsButton.textContent = "Enable push notifications";
     testNotificationButton.hidden = true;
-    setNotificationStatus("Notifications are off. Enable them to get alerts while Murmur is open in a background tab.");
+    setNotificationStatus(pushConfiguration.enabled
+      ? "Enable push notifications to get alerts even when Murmur is closed."
+      : "Push notifications are not configured by this server yet.");
   }
 }
 
 enableNotificationsButton.addEventListener("click", async () => {
   enableNotificationsButton.disabled = true;
   try {
-    await Notification.requestPermission();
-    updateNotificationControls();
+    if (pushSubscription) {
+      const response = await fetch("./api/me/push-subscriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ endpoint: pushSubscription.endpoint, enabled: false })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Could not turn off push notifications.");
+      }
+      const unsubscribed = await pushSubscription.unsubscribe();
+      if (!unsubscribed) {
+        throw new Error("The browser could not turn off this push subscription.");
+      }
+      pushSubscription = null;
+      setNotificationStatus("Push notifications are turned off. Notifications while Murmur is open may still appear.");
+    } else {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        await loadPushSettings();
+        return;
+      }
+      if (!pushConfiguration?.enabled || !pushConfiguration.public_key) {
+        throw new Error("Push notifications are not configured by this server.");
+      }
+      const registration = await navigator.serviceWorker.ready;
+      const applicationServerKey = decodeApplicationServerKey(pushConfiguration.public_key);
+      let subscription = await registration.pushManager.getSubscription();
+      const existingKey = subscription?.options.applicationServerKey;
+      const existingKeyBytes = existingKey ? new Uint8Array(existingKey) : null;
+      const keyMatches = existingKey
+        && existingKeyBytes.byteLength === applicationServerKey.byteLength
+        && applicationServerKey.every((byte, index) => byte === existingKeyBytes[index]);
+      if (subscription && !keyMatches) {
+        await subscription.unsubscribe();
+        subscription = null;
+      }
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey
+        });
+      }
+      pushSubscription = subscription;
+      try {
+        const response = await fetch("./api/me/push-subscriptions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(subscription.toJSON())
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Could not enable push notifications.");
+        }
+      } catch (error) {
+        await subscription.unsubscribe();
+        pushSubscription = null;
+        throw error;
+      }
+      setNotificationStatus("Push notifications are enabled. New messages can alert you while Murmur is closed.");
+    }
+    await loadPushSettings();
   } catch (error) {
     console.error("Could not request notification permission.", error);
-    setNotificationStatus("The browser could not enable notifications. Check its site permissions and try again.", true);
+    setNotificationStatus(error.message || "The browser could not update push settings. Check its site permissions and try again.", true);
   } finally {
     enableNotificationsButton.disabled = false;
   }
@@ -81,7 +185,7 @@ testNotificationButton.addEventListener("click", async () => {
   }
 });
 
-window.addEventListener("focus", updateNotificationControls);
+window.addEventListener("focus", loadPushSettings);
 
 function createProfileError(response, data) {
   const error = new Error(data.error || "Could not load the profile.");
@@ -196,7 +300,7 @@ async function initializeProfile() {
     if (isOwnProfile) {
       profilePhotoForm.hidden = false;
       notificationSettings.hidden = false;
-      updateNotificationControls();
+      await loadPushSettings();
       profilePhotoSelection.textContent = user.has_avatar
         ? "Choose a new photo · JPEG, PNG, or WebP · up to 200 MB"
         : "JPEG, PNG, or WebP · up to 200 MB";

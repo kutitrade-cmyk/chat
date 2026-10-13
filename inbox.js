@@ -318,6 +318,24 @@ async function pollUpdates() {
 signoutButton.addEventListener("click", async () => {
   signoutButton.disabled = true;
   try {
+    if ("serviceWorker" in navigator && "PushManager" in window) {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        const unsubscribeResponse = await fetch("./api/me/push-subscriptions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ endpoint: subscription.endpoint, enabled: false })
+        });
+        const unsubscribeData = await unsubscribeResponse.json();
+        if (!unsubscribeResponse.ok) {
+          throw getError(unsubscribeResponse, unsubscribeData, "Could not turn off push notifications before signing out.");
+        }
+        if (!await subscription.unsubscribe()) {
+          throw new Error("The browser could not turn off push notifications before signing out.");
+        }
+      }
+    }
     const response = await fetch("./api/logout", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },

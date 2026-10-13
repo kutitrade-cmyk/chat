@@ -1,8 +1,10 @@
 import argparse
+import base64
 import hashlib
 import json
 import mimetypes
 import os
+import re
 import secrets
 import sqlite3
 import string
@@ -27,6 +29,7 @@ MAX_PASSWORD_LENGTH = 1024
 MAX_MESSAGES_PER_REQUEST = 100
 DEFAULT_MESSAGES_PER_REQUEST = 50
 MAX_REQUEST_BODY = 16384
+MAX_PUSH_ENDPOINT_LENGTH = 2048
 MAX_IMAGE_UPLOAD_BYTES = 200 * 1024 * 1024
 IMAGE_TYPES = {
     "image/jpeg": (b"\xff\xd8\xff", ".jpg"),
@@ -36,6 +39,7 @@ IMAGE_TYPES = {
 PASSWORD_HASH_ITERATIONS = 310_000
 SESSION_LIFETIME_SECONDS = 14 * 24 * 60 * 60
 USERNAME_CHARACTERS = frozenset(string.ascii_letters + string.digits + "_.-")
+BASE64URL_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 PUBLIC_FILES = {
     "app.js",
     "auth.js",
@@ -156,6 +160,20 @@ def initialize_database():
         connection.execute(
             "CREATE INDEX IF NOT EXISTS messages_conversation_idx ON messages(conversation_id, id)"
         )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_subscriptions (
+                endpoint TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id)"
+        )
 
 
 def serialize_message(row):
@@ -214,6 +232,11 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
             user = self.get_authenticated_user()
             if user is not False:
                 self.send_json(200, {"user": self.public_user(user) if user else None})
+            return
+        if request.path == "/api/me/push-config":
+            user = self.require_authenticated_user()
+            if user is not None:
+                self.get_push_configuration(user)
             return
         if request.path == "/api/messages":
             user = self.require_authenticated_user()
@@ -372,6 +395,200 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
             self.send_json(401, {"error": "Please sign in to use chat."})
             return None
         return user
+
+    @staticmethod
+    def push_configuration():
+        public_key = os.environ.get("MURMUR_VAPID_PUBLIC_KEY", "").strip()
+        private_key = os.environ.get("MURMUR_VAPID_PRIVATE_KEY", "").strip()
+        subject = os.environ.get("MURMUR_VAPID_SUBJECT", "").strip()
+        return {
+            "enabled": bool(public_key and private_key and subject),
+            "public_key": public_key,
+            "private_key": private_key,
+            "subject": subject,
+        }
+
+    def get_push_configuration(self, user):
+        configuration = self.push_configuration()
+        try:
+            with sqlite3.connect(DATABASE_PATH) as connection:
+                subscribed = connection.execute(
+                    "SELECT 1 FROM push_subscriptions WHERE user_id = ? LIMIT 1",
+                    (user["id"],),
+                ).fetchone() is not None
+            self.send_json(
+                200,
+                {
+                    "enabled": configuration["enabled"],
+                    "public_key": configuration["public_key"] if configuration["enabled"] else None,
+                    "subscribed": subscribed,
+                },
+            )
+        except sqlite3.Error:
+            self.log_error("Could not load push notification settings.")
+            self.send_json(500, {"error": "Push notification settings are temporarily unavailable."})
+
+    @staticmethod
+    def is_valid_push_endpoint(endpoint):
+        if not isinstance(endpoint, str) or len(endpoint) > MAX_PUSH_ENDPOINT_LENGTH:
+            return False
+        try:
+            parsed = urlsplit(endpoint)
+            hostname = parsed.hostname
+            port = parsed.port
+        except ValueError:
+            return False
+        if (
+            parsed.scheme != "https"
+            or not hostname
+            or port not in (None, 443)
+            or parsed.username
+            or parsed.password
+        ):
+            return False
+        hostname = hostname.lower().rstrip(".")
+        allowed_hosts = (
+            "fcm.googleapis.com",
+            "push.services.mozilla.com",
+            "notify.windows.com",
+            "push.apple.com",
+        )
+        return any(
+            hostname == allowed_host or hostname.endswith("." + allowed_host)
+            for allowed_host in allowed_hosts
+        )
+
+    @staticmethod
+    def is_valid_subscription_key(value, expected_length):
+        if not isinstance(value, str) or len(value) > 128 or not BASE64URL_PATTERN.fullmatch(value):
+            return False
+        try:
+            decoded = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        except (ValueError, base64.binascii.Error):
+            return False
+        return len(decoded) == expected_length
+
+    def save_push_subscription(self, payload, user):
+        endpoint = payload.get("endpoint")
+        if not self.is_valid_push_endpoint(endpoint):
+            self.send_json(400, {"error": "The push service endpoint is invalid or unsupported."})
+            return
+
+        if payload.get("enabled") is False:
+            try:
+                with sqlite3.connect(DATABASE_PATH) as connection:
+                    connection.execute(
+                        "DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?",
+                        (endpoint, user["id"]),
+                    )
+                self.send_json(200, {"ok": True})
+            except sqlite3.Error:
+                self.log_error("Could not remove the push notification subscription.")
+                self.send_json(500, {"error": "Could not turn off push notifications."})
+            return
+
+        keys = payload.get("keys")
+        if not isinstance(keys, dict):
+            self.send_json(400, {"error": "The push subscription keys are invalid."})
+            return
+        p256dh = keys.get("p256dh")
+        auth = keys.get("auth")
+        if not self.is_valid_subscription_key(p256dh, 65) or not self.is_valid_subscription_key(auth, 16):
+            self.send_json(400, {"error": "The push subscription keys are invalid."})
+            return
+
+        configuration = self.push_configuration()
+        if not configuration["enabled"]:
+            self.send_json(503, {"error": "Push notifications are not configured on this server."})
+            return
+
+        created_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        try:
+            with sqlite3.connect(DATABASE_PATH) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO push_subscriptions (endpoint, user_id, p256dh, auth, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(endpoint) DO UPDATE SET
+                        user_id = excluded.user_id,
+                        p256dh = excluded.p256dh,
+                        auth = excluded.auth,
+                        created_at = excluded.created_at
+                    """,
+                    (endpoint, user["id"], p256dh, auth, created_at),
+                )
+            self.send_json(200, {"ok": True})
+        except sqlite3.Error:
+            self.log_error("Could not save the push notification subscription.")
+            self.send_json(500, {"error": "Could not enable push notifications."})
+
+    def send_push_notifications(self, conversation_id, sender, message_id):
+        configuration = self.push_configuration()
+        if not configuration["enabled"]:
+            return
+
+        try:
+            with sqlite3.connect(DATABASE_PATH) as connection:
+                subscriptions = connection.execute(
+                    """
+                    SELECT subscriptions.endpoint, subscriptions.p256dh, subscriptions.auth
+                    FROM push_subscriptions AS subscriptions
+                    JOIN conversation_members AS members
+                        ON members.user_id = subscriptions.user_id
+                    WHERE members.conversation_id = ? AND members.user_id != ?
+                    """,
+                    (conversation_id, sender["id"]),
+                ).fetchall()
+        except sqlite3.Error:
+            self.log_error("Could not load push notification recipients.")
+            return
+
+        if not subscriptions:
+            return
+
+        from pywebpush import WebPushException, webpush
+
+        payload = json.dumps(
+            {
+                "title": f"New message from {sender['username']}",
+                "body": "You received a new message.",
+                "url": f"./conversation.html?conversation={conversation_id}",
+                "tag": f"chat-message-{message_id}",
+            }
+        )
+        for endpoint, p256dh, auth in subscriptions:
+            subscription = {
+                "endpoint": endpoint,
+                "keys": {"p256dh": p256dh, "auth": auth},
+            }
+            try:
+                webpush(
+                    subscription_info=subscription,
+                    data=payload,
+                    vapid_private_key=configuration["private_key"],
+                    vapid_claims={"sub": configuration["subject"]},
+                    timeout=5,
+                    ttl=86400,
+                )
+            except WebPushException as error:
+                response = getattr(error, "response", None)
+                status_code = getattr(response, "status_code", None)
+                if status_code in (404, 410):
+                    try:
+                        with sqlite3.connect(DATABASE_PATH) as connection:
+                            connection.execute(
+                                "DELETE FROM push_subscriptions WHERE endpoint = ?",
+                                (endpoint,),
+                            )
+                    except sqlite3.Error:
+                        self.log_error("Could not remove an expired push subscription.")
+                else:
+                    self.log_error(
+                        "Push notification delivery failed"
+                        + (f" with status {status_code}." if status_code else ".")
+                    )
+            except (OSError, ValueError):
+                self.log_error("Push notification delivery failed because of a network or configuration error.")
 
     def validate_same_origin(self):
         if self.headers.get("Sec-Fetch-Site") == "cross-site":
@@ -1028,12 +1245,15 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
         conversation_route = self.conversation_route(request_path)
         conversation_upload_id = self.conversation_upload_route(request_path)
         is_avatar_upload = request_path == "/api/me/avatar"
+        is_push_subscription = request_path == "/api/me/push-subscriptions"
         if request_path not in (
             "/api/signup",
             "/api/login",
             "/api/logout",
             "/api/conversations",
-        ) and not (conversation_route and conversation_route[1] in ("messages", "read")) and not (
+        ) and not is_push_subscription and not (
+            conversation_route and conversation_route[1] in ("messages", "read")
+        ) and not (
             conversation_upload_id is not None or is_avatar_upload
         ):
             self.send_json(404, {"error": "Not found."})
@@ -1069,6 +1289,9 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
 
         user = self.require_authenticated_user()
         if user is None:
+            return
+        if is_push_subscription:
+            self.save_push_subscription(payload, user)
             return
         if request_path == "/api/conversations":
             self.create_conversation(payload, user)
@@ -1113,6 +1336,7 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                     """,
                     (cursor.lastrowid,),
                 ).fetchone()
+            self.send_push_notifications(conversation_id, user, row[0])
             self.send_json(201, {"message": serialize_message(row)})
         except sqlite3.Error:
             self.log_error("Could not save chat message to the database.")
@@ -1247,6 +1471,7 @@ class PwaRequestHandler(BaseHTTPRequestHandler):
                     """,
                     (cursor.lastrowid,),
                 ).fetchone()
+            self.send_push_notifications(conversation_id, user, row[0])
             self.send_json(201, {"message": serialize_message(tuple(row[:5]) + (0, row[5]))})
         except sqlite3.Error:
             try:

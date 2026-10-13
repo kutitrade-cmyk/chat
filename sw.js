@@ -1,4 +1,4 @@
-const CACHE_NAME = "murmur-shell-v16";
+const CACHE_NAME = "murmur-shell-v20";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -108,12 +108,14 @@ self.addEventListener("push", (event) => {
   const title = typeof payload.title === "string" ? payload.title : "Murmur";
   const body = typeof payload.body === "string" ? payload.body : "You have a new notification.";
   const safeUrl = resolveAppUrl(payload.url);
+  const tag = typeof payload.tag === "string" ? payload.tag : undefined;
 
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
       icon: "./icons/icon.svg",
       badge: "./icons/icon.svg",
+      tag,
       data: { url: safeUrl },
       actions: [{ action: "open", title: "Open app" }]
     })
