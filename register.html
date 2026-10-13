@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#176b61">
+    <meta name="description" content="Create an account to start private chats.">
+    <title>Create account | Murmur</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./icons/icon-192.png">
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body class="auth-page" data-page="register">
+    <main class="auth-shell">
+      <a class="brand auth-brand" href="./register.html" aria-label="Murmur registration">
+        <img class="brand-logo" src="./icons/icon.svg" alt="">
+        <span>Murmur</span>
+      </a>
+      <section class="auth-page-card" aria-labelledby="auth-title">
+        <p class="eyebrow">Join the conversation</p>
+        <h1 id="auth-title">Create your account.</h1>
+        <p class="auth-page-copy">Choose a username so other people can find you and start a private chat.</p>
+        <form class="auth-form auth-form-single" id="auth-form">
+          <label for="auth-username">Username</label>
+          <input id="auth-username" name="username" type="text" minlength="3" maxlength="30" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+          <span class="field-hint">3–30 letters, numbers, dots, dashes, or underscores.</span>
+          <label for="auth-password">Password</label>
+          <input id="auth-password" name="password" type="password" minlength="8" maxlength="1024" autocomplete="new-password" required>
+          <span class="field-hint">Use at least 8 characters.</span>
+          <button class="button button-primary" type="submit">Create account</button>
+        </form>
+        <p class="auth-status" id="auth-status" role="status" aria-live="polite">Checking your account…</p>
+        <p class="auth-page-switch">Already have an account? <a href="./login.html">Sign in</a></p>
+      </section>
+      <p class="auth-page-footnote">Private conversations, on every device.</p>
+    </main>
+  </body>
+</html>

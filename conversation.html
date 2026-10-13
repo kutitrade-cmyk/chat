@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#176b61">
+    <meta name="description" content="Private conversation history.">
+    <title>Chat | Murmur</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./icons/icon-192.png">
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body class="conversation-body" data-page="conversation">
+    <main class="page-shell conversation-shell">
+      <section class="conversation-page" aria-labelledby="conversation-title">
+        <header class="conversation-page-header">
+          <button class="chat-back-button" id="back-to-chats-button" type="button" aria-label="Back to chats">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6M9 12h11" /></svg>
+          </button>
+          <a class="thread-profile" id="thread-profile-link" href="./index.html">
+            <span class="conversation-avatar thread-avatar" id="thread-avatar" aria-hidden="true">?</span>
+            <div class="thread-profile-name">
+              <h1 id="conversation-title"></h1>
+            </div>
+          </a>
+        </header>
+
+        <div class="chat-history conversation-history" id="chat-history" role="log" aria-label="Chat history" aria-live="polite" aria-relevant="additions">
+          <p class="chat-empty" id="chat-empty">Say hello to start the conversation.</p>
+        </div>
+        <button class="button button-quiet load-older-button" id="load-older-button" type="button" hidden>Load earlier messages</button>
+        <form class="chat-form conversation-form" id="chat-form">
+          <label class="chat-attach-button" for="chat-image" aria-label="Attach an image">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5a5.5 5.5 0 0 1-5.5-5.5V7a4 4 0 0 1 8 0v8a2.5 2.5 0 0 1-5 0V8" /></svg>
+          </label>
+          <input class="visually-hidden" id="chat-image" type="file" accept="image/jpeg,image/png,image/webp">
+          <div class="chat-composer">
+            <p class="chat-attachment-preview" id="chat-attachment-preview" hidden></p>
+            <label class="visually-hidden" for="chat-message">Write a message or image caption</label>
+            <textarea id="chat-message" name="message" maxlength="2000" rows="1" placeholder="Message…" enterkeyhint="send"></textarea>
+          </div>
+          <button class="chat-send-button" id="send-message-button" type="submit" aria-label="Send message">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 4 17 8-17 8 3-8-3-8Zm3 8h14" /></svg>
+          </button>
+        </form>
+        <p class="chat-page-status" id="chat-status" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+  </body>
+</html>

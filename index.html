@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#176b61">
+    <meta name="description" content="Private conversations, closer together.">
+    <title>Inbox | Murmur</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./icons/icon-192.png">
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body data-page="inbox">
+    <main class="page-shell inbox-page">
+      <header class="topbar">
+        <a class="brand" href="./index.html" aria-label="Murmur inbox">
+          <img class="brand-logo" src="./icons/icon.svg" alt="">
+          <span>Murmur</span>
+        </a>
+        <div class="chat-account">
+          <a class="chat-account-profile" id="profile-link" href="./profile.html">
+            <span class="conversation-avatar account-avatar" id="account-avatar" aria-hidden="true">?</span>
+            <span class="chat-account-name" id="signed-in-username"></span>
+          </a>
+          <button class="button button-quiet signout-button" id="signout-button" type="button">Sign out</button>
+        </div>
+      </header>
+
+      <section class="inbox-heading" aria-labelledby="inbox-title">
+        <p class="eyebrow">YOUR SPACE, YOUR PEOPLE</p>
+        <h1 id="inbox-title">Good conversations<br><span>start here.</span></h1>
+        <p class="intro">Pick up where you left off, or find someone new to talk to.</p>
+      </section>
+
+      <section class="chat-panel inbox-panel" aria-labelledby="chat-list-title">
+        <div class="inbox-section-heading">
+          <div>
+            <p class="card-label">YOUR INBOX</p>
+            <h2 id="chat-list-title">Conversations</h2>
+          </div>
+          <form class="new-chat-form inbox-new-chat" id="new-chat-form">
+            <label for="new-chat-username">Find someone by username</label>
+            <div class="new-chat-controls">
+              <input id="new-chat-username" name="username" type="search" minlength="3" maxlength="30" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Search people by username" aria-controls="user-search-results" required>
+              <button class="button button-primary inbox-start-button" type="submit" aria-label="Start chat">
+                <span aria-hidden="true">+</span><span>New chat</span>
+              </button>
+            </div>
+            <ul class="user-search-results" id="user-search-results" aria-label="Username search results" hidden></ul>
+            <p class="new-chat-status" id="new-chat-status" role="status" aria-live="polite"></p>
+          </form>
+        </div>
+        <nav class="conversation-list inbox-conversation-list" id="conversation-list" aria-label="Recent chats">
+          <div class="conversation-list-empty" id="conversation-list-empty">
+            <span class="inbox-empty-icon" aria-hidden="true">♡</span>
+            <strong>Your inbox is a blank page.</strong>
+            <span>Search for a username above to start your first chat.</span>
+          </div>
+        </nav>
+        <p class="chat-connection" id="chat-status" role="status" aria-live="polite">Loading chats…</p>
+      </section>
+
+    </main>
+  </body>
+</html>

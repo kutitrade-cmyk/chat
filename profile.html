@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#176b61">
+    <meta name="description" content="View a chat profile and profile photo.">
+    <title>Profile | Murmur</title>
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./icons/icon-192.png">
+    <link rel="stylesheet" href="./styles.css">
+    <script src="./app.js" defer></script>
+  </head>
+  <body data-page="profile">
+    <main class="page-shell profile-shell">
+      <a class="button button-quiet profile-back-button" id="profile-back-link" href="./index.html">
+        <span aria-hidden="true">←</span><span id="profile-back-label">Back to chats</span>
+      </a>
+      <section class="profile-card" aria-labelledby="profile-username">
+        <div class="profile-avatar" id="profile-avatar" aria-hidden="true">?</div>
+        <h1 id="profile-username">Loading profile…</h1>
+        <p class="profile-label">Profile</p>
+        <form class="profile-photo-form" id="profile-photo-form" hidden>
+          <label class="button button-primary profile-photo-button" for="profile-photo-input">Choose profile photo</label>
+          <input class="visually-hidden" id="profile-photo-input" type="file" accept="image/jpeg,image/png,image/webp">
+          <p class="profile-photo-selection" id="profile-photo-selection">JPEG, PNG, or WebP · up to 200 MB</p>
+          <button class="button button-primary" id="save-profile-photo" type="submit" disabled>Save photo</button>
+        </form>
+        <section class="notification-settings" id="notification-settings" hidden aria-labelledby="notification-settings-title">
+          <div class="notification-settings-copy">
+            <h2 id="notification-settings-title">Message notifications</h2>
+            <p>Get an alert when a message arrives while Murmur is open in a background tab. Close every Murmur tab and message polling stops.</p>
+          </div>
+          <button class="button button-primary" id="enable-notifications" type="button">Enable notifications</button>
+          <button class="button button-quiet" id="test-notification" type="button" hidden>Send a test notification</button>
+          <p class="notification-settings-status" id="notification-settings-status" role="status" aria-live="polite"></p>
+        </section>
+        <p class="profile-status" id="profile-status" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+  </body>
+</html>
